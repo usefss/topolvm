@@ -48,7 +48,7 @@ func containString(s []string, target string) bool {
 	return false
 }
 
-func commonBeforeEach() *CleanupContext {
+func commonBeforeEach(before *CleanupContext) *CleanupContext {
 	var cc CleanupContext
 	var err error
 
@@ -58,6 +58,10 @@ func commonBeforeEach() *CleanupContext {
 	cc.CapacityAnnotations, err = getNodeAnnotationMapWithPrefix(topolvm.CapacityKeyPrefix)
 	ExpectWithOffset(1, err).ShouldNot(HaveOccurred())
 
+	if before != nil {
+		diff := cmp.Diff(before.CapacityAnnotations, cc)
+		Expect(diff).Should(BeEmpty())
+	}
 	return &cc
 }
 

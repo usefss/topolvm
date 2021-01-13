@@ -7,7 +7,6 @@ import (
 	"net"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	topolvmv1 "github.com/topolvm/topolvm/api/v1"
@@ -61,12 +60,7 @@ func testPublishVolume() {
 	var cc *CleanupContext
 
 	BeforeEach(func() {
-		beforeCC := cc
-		cc = commonBeforeEach()
-		if beforeCC != nil {
-			diff := cmp.Diff(beforeCC.CapacityAnnotations, cc)
-			Expect(diff).Should(BeEmpty())
-		}
+		cc = commonBeforeEach(cc)
 
 		dialer := &net.Dialer{}
 		dialFunc := func(ctx context.Context, a string) (net.Conn, error) {

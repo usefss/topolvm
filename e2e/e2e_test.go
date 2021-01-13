@@ -20,10 +20,10 @@ import (
 func testE2E() {
 	testNamespacePrefix := "e2etest-"
 	var ns string
-	var cc CleanupContext
+	var cc *CleanupContext
 
 	BeforeEach(func() {
-		cc = commonBeforeEach()
+		cc = commonBeforeEach(cc)
 
 		ns = testNamespacePrefix + randomString(10)
 		createNamespace(ns)
