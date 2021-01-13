@@ -48,7 +48,7 @@ func containString(s []string, target string) bool {
 	return false
 }
 
-func commonBeforeEach() CleanupContext {
+func commonBeforeEach() *CleanupContext {
 	var cc CleanupContext
 	var err error
 
@@ -58,10 +58,11 @@ func commonBeforeEach() CleanupContext {
 	cc.CapacityAnnotations, err = getNodeAnnotationMapWithPrefix(topolvm.CapacityKeyPrefix)
 	ExpectWithOffset(1, err).ShouldNot(HaveOccurred())
 
-	return cc
+	return &cc
 }
 
-func commonAfterEach(cc CleanupContext) {
+func commonAfterEach(cc *CleanupContext) {
+	Expect(cc).ShouldNot(BeNil())
 	if !CurrentGinkgoTestDescription().Failed {
 		EventuallyWithOffset(1, func() error {
 			lvmCountAfter, err := countLVMs()
