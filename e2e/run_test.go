@@ -59,7 +59,7 @@ func commonBeforeEach(before *CleanupContext) *CleanupContext {
 	ExpectWithOffset(1, err).ShouldNot(HaveOccurred())
 
 	if before != nil {
-		diff := cmp.Diff(before.CapacityAnnotations, cc)
+		diff := cmp.Diff(before.CapacityAnnotations, cc.CapacityAnnotations)
 		Expect(diff).Should(BeEmpty())
 	}
 	return &cc
