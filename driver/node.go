@@ -129,6 +129,9 @@ func (s *nodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 			}
 		}
 	} else {
+		nodeLogger.Info("start to find LV",
+			"volume_id", volumeID)
+
 		lvr, err := s.k8sLVService.GetVolume(ctx, volumeID)
 		if err != nil {
 			return nil, err
@@ -164,6 +167,8 @@ func (s *nodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 }
 
 func (s *nodeService) nodePublishFilesystemVolume(req *csi.NodePublishVolumeRequest, lv *proto.LogicalVolume) (*csi.NodePublishVolumeResponse, error) {
+	nodeLogger.Info("nodePublishFilesystemVolume", "volume_id", req.GetVolumeId())
+
 	// Check request
 	mountOption := req.GetVolumeCapability().GetMount()
 	if mountOption.FsType == "" {
@@ -194,6 +199,7 @@ func (s *nodeService) nodePublishFilesystemVolume(req *csi.NodePublishVolumeRequ
 		mountOptions = append(mountOptions, f)
 	}
 
+	nodeLogger.Info("making dir", "volume_id", req.GetVolumeId(), "path", req.GetTargetPath())
 	err = os.MkdirAll(req.GetTargetPath(), 0755)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "mkdir failed: target=%s, error=%v", req.GetTargetPath(), err)
@@ -214,9 +220,11 @@ func (s *nodeService) nodePublishFilesystemVolume(req *csi.NodePublishVolumeRequ
 	}
 
 	if !mounted {
+		nodeLogger.Info("call FormatAndMount", "volume_id", req.GetVolumeId())
 		if err := s.mounter.FormatAndMount(device, req.GetTargetPath(), mountOption.FsType, mountOptions); err != nil {
 			return nil, status.Errorf(codes.Internal, "mount failed: volume=%s, error=%v", req.GetVolumeId(), err)
 		}
+		nodeLogger.Info("exec chmod", "volume_id", req.GetVolumeId())
 		if err := os.Chmod(req.GetTargetPath(), 0777|os.ModeSetgid); err != nil {
 			return nil, status.Errorf(codes.Internal, "chmod 2777 failed: target=%s, error=%v", req.GetTargetPath(), err)
 		}
@@ -231,20 +239,25 @@ func (s *nodeService) nodePublishFilesystemVolume(req *csi.NodePublishVolumeRequ
 }
 
 func (s *nodeService) createDeviceIfNeeded(device string, lv *proto.LogicalVolume) error {
+	nodeLogger.Info("createDeviceIfNeeded", "device", device)
+
 	var stat unix.Stat_t
 	err := filesystem.Stat(device, &stat)
 	switch err {
 	case nil:
+		nodeLogger.Info("checking attribute", "device", device)
 		// a block device already exists, check its attributes
 		if stat.Rdev == unix.Mkdev(lv.DevMajor, lv.DevMinor) && (stat.Mode&devicePermission) == devicePermission {
 			return nil
 		}
+		nodeLogger.Info("failed to check attribute", "device", device)
 		err := os.Remove(device)
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to remove device file %s: error=%v", device, err)
 		}
 		fallthrough
 	case unix.ENOENT:
+		nodeLogger.Info("exec mknod", "device", device)
 		devno := unix.Mkdev(lv.DevMajor, lv.DevMinor)
 		if err := filesystem.Mknod(device, devicePermission, int(devno)); err != nil {
 			return status.Errorf(codes.Internal, "mknod failed for %s. major=%d, minor=%d, error=%v",
@@ -257,6 +270,8 @@ func (s *nodeService) createDeviceIfNeeded(device string, lv *proto.LogicalVolum
 }
 
 func (s *nodeService) nodePublishBlockVolume(req *csi.NodePublishVolumeRequest, lv *proto.LogicalVolume) (*csi.NodePublishVolumeResponse, error) {
+	nodeLogger.Info("nodePublishBlockVolume", "volume_id", req.GetVolumeId())
+
 	// Find lv and create a block device with it
 	var stat unix.Stat_t
 	target := req.GetTargetPath()

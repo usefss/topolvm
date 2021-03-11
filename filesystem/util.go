@@ -9,7 +9,10 @@ import (
 	"strings"
 
 	"golang.org/x/sys/unix"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
+
+var utilLogger = ctrl.Log.WithName("util")
 
 const (
 	blkidCmd = "/sbin/blkid"
@@ -20,14 +23,17 @@ type temporaryer interface {
 }
 
 func isSameDevice(dev1, dev2 string) (bool, error) {
+	utilLogger.Info("isSameDevice")
 	if dev1 == dev2 {
 		return true, nil
 	}
 
 	var st1, st2 unix.Stat_t
+	utilLogger.Info("exec Stat", "dev1", dev1)
 	if err := Stat(dev1, &st1); err != nil {
 		return false, fmt.Errorf("stat failed for %s: %v", dev1, err)
 	}
+	utilLogger.Info("exec Stat", "dev2", dev2)
 	if err := Stat(dev2, &st2); err != nil {
 		return false, fmt.Errorf("stat failed for %s: %v", dev2, err)
 	}
@@ -38,10 +44,13 @@ func isSameDevice(dev1, dev2 string) (bool, error) {
 // IsMounted returns true if device is mounted on target.
 // The implementation uses /proc/mounts because some filesystem uses a virtual device.
 func IsMounted(device, target string) (bool, error) {
+	utilLogger.Info("IsMounted", "device", device)
+
 	abs, err := filepath.Abs(target)
 	if err != nil {
 		return false, err
 	}
+	utilLogger.Info("EvalSymlinks1", "device", device, "path", abs)
 	target, err = filepath.EvalSymlinks(abs)
 	if err != nil {
 		return false, err
@@ -58,6 +67,7 @@ func IsMounted(device, target string) (bool, error) {
 			continue
 		}
 
+		utilLogger.Info("EvalSymlinks2", "device", device, "path", fields[1])
 		d, err := filepath.EvalSymlinks(fields[1])
 		if err != nil {
 			return false, err
@@ -73,14 +83,21 @@ func IsMounted(device, target string) (bool, error) {
 // DetectFilesystem returns filesystem type if device has a filesystem.
 // This returns an empty string if no filesystem exists.
 func DetectFilesystem(device string) (string, error) {
+	utilLogger.Info("DetectFilesystem", "device", device)
+
 	f, err := os.Open(device)
 	if err != nil {
 		return "", err
 	}
 	// synchronizes dirty data
-	f.Sync()
+	utilLogger.Info("Sync", "device", device)
+	err = f.Sync()
+	if err != nil {
+		utilLogger.Info("Sync error", "device", device, "err", err)
+	}
 	f.Close()
 
+	utilLogger.Info("exec blkid", "device", device)
 	out, err := exec.Command(blkidCmd, "-c", "/dev/null", "-o", "export", device).CombinedOutput()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
