@@ -93,8 +93,13 @@ func (s *nodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	}
 	isInlineEphemeralVolumeReq := volumeContext[ephVolConKey] == "true"
 
+	nodeLogger.Info("lock mutex in NodePublishVolume", "volume_id", volumeID)
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	nodeLogger.Info("locked", "volume_id", volumeID)
+	defer func() {
+		nodeLogger.Info("unlock mutex in NodePublishVolume", "volume_id", volumeID)
+		s.mu.Unlock()
+	}()
 
 	var lv *proto.LogicalVolume
 	var err error
@@ -250,7 +255,7 @@ func (s *nodeService) createDeviceIfNeeded(device string, lv *proto.LogicalVolum
 		if stat.Rdev == unix.Mkdev(lv.DevMajor, lv.DevMinor) && (stat.Mode&devicePermission) == devicePermission {
 			return nil
 		}
-		nodeLogger.Info("failed to check attribute", "device", device)
+		nodeLogger.Info("remove device", "device", device)
 		err := os.Remove(device)
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to remove device file %s: error=%v", device, err)
@@ -306,6 +311,7 @@ func (s *nodeService) nodePublishBlockVolume(req *csi.NodePublishVolumeRequest, 
 }
 
 func (s *nodeService) findVolumeByID(listResp *proto.GetLVListResponse, name string) *proto.LogicalVolume {
+	nodeLogger.Info("findVolumeByID called", "name", name)
 	for _, v := range listResp.Volumes {
 		if v.Name == name {
 			return v
@@ -315,6 +321,7 @@ func (s *nodeService) findVolumeByID(listResp *proto.GetLVListResponse, name str
 }
 
 func (s *nodeService) getLvFromContext(ctx context.Context, deviceClass, volumeID string) (*proto.LogicalVolume, error) {
+	nodeLogger.Info("getLvFromContext called", "volume_id", volumeID)
 	listResp, err := s.client.GetLVList(ctx, &proto.GetLVListRequest{DeviceClass: deviceClass})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list LV: %v", err)
@@ -336,15 +343,22 @@ func (s *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return nil, status.Error(codes.InvalidArgument, "no target_path is provided")
 	}
 
+	nodeLogger.Info("lock mutex in NodeUnpublishVolume", "volume_id", volID)
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	nodeLogger.Info("locked", "volume_id", volID)
+	defer func() {
+		nodeLogger.Info("unlock mutex in NodeUnpublishVolume", "volume_id", volID)
+		s.mu.Unlock()
+	}()
 
 	device := filepath.Join(DeviceDirectory, volID)
 
 	info, err := os.Stat(target)
 	if os.IsNotExist(err) {
 		// target_path does not exist, but device for mount-type PV may still exist.
+		nodeLogger.Info("remove device", "device", device)
 		_ = os.Remove(device)
+		nodeLogger.Info("removed", "device", device)
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	} else if err != nil {
 		return nil, status.Errorf(codes.Internal, "stat failed for %s: %v", target, err)
@@ -361,16 +375,19 @@ func (s *nodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 			return nil, err
 		}
 		if volume != nil && s.isEphemeralVolume(volume) {
+			nodeLogger.Info("remove lv", "volume_id", volID)
 			if _, err = s.lvService.RemoveLV(ctx, &proto.RemoveLVRequest{Name: volID, DeviceClass: topolvm.DefaultDeviceClassName}); err != nil {
 				return nil, status.Errorf(codes.Internal, "failed to remove LV for %s: %v", volID, err)
 			}
 		}
+		nodeLogger.Info("NodeUnpublishVolume is succeeded", "volume_id", req.GetVolumeId())
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 	return s.nodeUnpublishBlockVolume(req)
 }
 
 func (s *nodeService) isEphemeralVolume(volume *proto.LogicalVolume) bool {
+	nodeLogger.Info("isEphemeralVolume", "name", volume.GetName())
 	for _, tag := range volume.GetTags() {
 		if tag == "ephemeral" {
 			return true
@@ -380,6 +397,7 @@ func (s *nodeService) isEphemeralVolume(volume *proto.LogicalVolume) bool {
 }
 
 func (s *nodeService) nodeUnpublishFilesystemVolume(req *csi.NodeUnpublishVolumeRequest, device string) (*csi.NodeUnpublishVolumeResponse, error) {
+	nodeLogger.Info("nodeUnpublishFilesystemVolume", "volume_id", req.GetVolumeId())
 	target := req.GetTargetPath()
 
 	mounted, err := filesystem.IsMounted(device, target)
@@ -387,15 +405,19 @@ func (s *nodeService) nodeUnpublishFilesystemVolume(req *csi.NodeUnpublishVolume
 		return nil, status.Errorf(codes.Internal, "mount check failed: target=%s, error=%v", target, err)
 	}
 	if mounted {
+		nodeLogger.Info("call Unmount", "volume_id", req.GetVolumeId(), "target", target)
 		if err := s.mounter.Unmount(target); err != nil {
 			return nil, status.Errorf(codes.Internal, "unmount failed for %s: error=%v", target, err)
 		}
+		nodeLogger.Info("finish Unmount", "volume_id", req.GetVolumeId())
 	}
 
+	nodeLogger.Info("remove all", "target", target)
 	if err := os.RemoveAll(target); err != nil {
 		return nil, status.Errorf(codes.Internal, "remove dir failed for %s: error=%v", target, err)
 	}
 
+	nodeLogger.Info("remove device", "device", device)
 	err = os.Remove(device)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, status.Errorf(codes.Internal, "remove device failed for %s: error=%v", device, err)
@@ -408,6 +430,7 @@ func (s *nodeService) nodeUnpublishFilesystemVolume(req *csi.NodeUnpublishVolume
 }
 
 func (s *nodeService) nodeUnpublishBlockVolume(req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	nodeLogger.Info("nodeUnpublishFilesystemVolume", "volume_id", req.GetVolumeId())
 	if err := os.Remove(req.GetTargetPath()); err != nil {
 		return nil, status.Errorf(codes.Internal, "remove failed for %s: error=%v", req.GetTargetPath(), err)
 	}
@@ -556,8 +579,13 @@ func (s *nodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return nil, status.Errorf(codes.Internal, "filesystem %s is not mounted at %s", vid, vpath)
 	}
 
+	nodeLogger.Info("lock mutex in NodeExpandVolume", "volume_id", vid)
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	nodeLogger.Info("locked", "volume_id", vid)
+	defer func() {
+		nodeLogger.Info("unlock mutex in NodeExpandVolume", "volume_id", vid)
+		s.mu.Unlock()
+	}()
 
 	r := filesystem.NewResizeFs(&s.mounter)
 	if _, err := r.Resize(device, vpath); err != nil {
