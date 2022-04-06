@@ -2,7 +2,6 @@ package lvmd
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"testing"
 	"time"
@@ -204,10 +203,10 @@ func testVGService(t *testing.T, vg *command.VolumeGroup) {
 }
 
 func TestVGService(t *testing.T) {
-	uid := os.Getuid()
-	if uid != 0 {
-		t.Skip("run as root")
-	}
+	// uid := os.Getuid()
+	// if uid != 0 {
+	// 	t.Skip("run as root")
+	// }
 
 	vgName := "test_vgservice"
 	loop1, err := MakeLoopbackDevice(vgName + "1")
